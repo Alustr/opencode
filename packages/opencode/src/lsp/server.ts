@@ -556,62 +556,62 @@ export namespace LSPServer {
     },
   }
 
-  export const ElixirLS: Info = {
-    id: "elixir-ls",
+  export const Expert: Info = {
+    id: "expert",
     extensions: [".ex", ".exs"],
     root: NearestRoot(["mix.exs", "mix.lock"]),
     async spawn(root) {
-      let binary = Bun.which("elixir-ls")
-      if (!binary) {
-        const elixirLsPath = path.join(Global.Path.bin, "elixir-ls")
-        binary = path.join(
-          Global.Path.bin,
-          "elixir-ls-master",
-          "release",
-          process.platform === "win32" ? "language_server.bat" : "language_server.sh",
-        )
+      let bin = Bun.which("expert", {
+        PATH: process.env["PATH"] + path.delimiter + Global.Path.bin,
+      })
 
-        if (!(await Bun.file(binary).exists())) {
-          const elixir = Bun.which("elixir")
-          if (!elixir) {
-            log.error("elixir is required to run elixir-ls")
-            return
-          }
+      if (!bin) {
+        if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
+        log.info("downloading expert from GitHub releases")
 
-          if (Flag.OPENCODE_DISABLE_LSP_DOWNLOAD) return
-          log.info("downloading elixir-ls from GitHub releases")
-
-          const response = await fetch("https://github.com/elixir-lsp/elixir-ls/archive/refs/heads/master.zip")
-          if (!response.ok) return
-          const zipPath = path.join(Global.Path.bin, "elixir-ls.zip")
-          await Bun.file(zipPath).write(response)
-
-          const ok = await Archive.extractZip(zipPath, Global.Path.bin)
-            .then(() => true)
-            .catch((error) => {
-              log.error("Failed to extract elixir-ls archive", { error })
-              return false
-            })
-          if (!ok) return
-
-          await fs.rm(zipPath, {
-            force: true,
-            recursive: true,
-          })
-
-          await $`mix deps.get && mix compile && mix elixir_ls.release2 -o release`
-            .quiet()
-            .cwd(path.join(Global.Path.bin, "elixir-ls-master"))
-            .env({ MIX_ENV: "prod", ...process.env })
-
-          log.info(`installed elixir-ls`, {
-            path: elixirLsPath,
-          })
+        const releaseResponse = await fetch("https://api.github.com/repos/elixir-lang/expert/releases/latest")
+        if (!releaseResponse.ok) {
+          log.error("Failed to fetch expert release info")
+          return
         }
+
+        const release = (await releaseResponse.json()) as {
+          assets?: { name?: string; browser_download_url?: string }[]
+        }
+
+        const platform = process.platform
+        const arch = process.arch
+
+        const expertArch = arch === "arm64" ? "arm64" : "amd64"
+        const expertPlatform = platform === "win32" ? "windows" : platform
+        const expertExt = platform === "win32" ? ".exe" : ""
+        const assetName = `expert_${expertPlatform}_${expertArch}${expertExt}`
+
+        const assets = release.assets ?? []
+        const asset = assets.find((a) => a.name === assetName)
+        if (!asset?.browser_download_url) {
+          log.error(`Could not find asset ${assetName} in expert release`)
+          return
+        }
+
+        const downloadResponse = await fetch(asset.browser_download_url)
+        if (!downloadResponse.ok) {
+          log.error("Failed to download expert")
+          return
+        }
+
+        bin = path.join(Global.Path.bin, "expert" + expertExt)
+        await Bun.file(bin).write(downloadResponse)
+
+        if (platform !== "win32") {
+          await $`chmod +x ${bin}`.quiet().nothrow()
+        }
+
+        log.info(`installed expert`, { bin })
       }
 
       return {
-        process: spawn(binary, {
+        process: spawn(bin, ["--stdio"], {
           cwd: root,
         }),
       }
